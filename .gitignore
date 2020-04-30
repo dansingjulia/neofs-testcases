@@ -31,3 +31,10 @@ testfile
 
 # debhelpers
 **/.debhelper
+# ignore test result files under any path
+**/log.html
+**/output.xml
+**/report.html
+
+# ignore pycache under any path
+**/__pycache__
