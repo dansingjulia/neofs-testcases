@@ -8,22 +8,15 @@ This README would normally document whatever steps are necessary to get your app
 * Version
 * [Learn Markdown](https://bitbucket.org/tutorials/markdowndemo)
 
-### How do I get set up? ###
-
-* Summary of set up
-* Configuration
-* Dependencies
-* Database configuration
-* How to run tests
-* Deployment instructions
-
-### Contribution guidelines ###
-
-* Writing tests
-* Code review
-* Other guidelines
-
-### Who do I talk to? ###
+#### Локальная сборка
+Чтобы локально собрать образ, нужно, стоя в корне репо, выполнить
+команду:
+```
+drone exec --trusted --secret-file=secrets.txt --volume /var/run/docker.sock
+```
+В результате будет прогнан полный пайплайн, за исключением пуша образа в
+docker registry. Чтобы запушить образ, нужно указать пароль к реджистри в
+файле `secrets.txt`.
 <p align="center">
   <img src="./.github/logo.svg" width="500px" alt="FrostFS">
 </p>
