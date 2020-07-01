@@ -1,163 +1,61 @@
-#!/usr/bin/make -f
-SHELL = bash
+VERSION=0.0.17
+PREFIX=
 
-REPO ?= $(shell go list -m)
-VERSION ?= $(shell git describe --tags --dirty --match "v*" --always --abbrev=8 2>/dev/null || cat VERSION 2>/dev/null || echo "develop")
+B=\033[0;1m
+G=\033[0;92m
+R=\033[0m
 
-HUB_IMAGE ?= truecloudlab/frostfs
-HUB_TAG ?= "$(shell echo ${VERSION} | sed 's/^v//')"
+.DEFAULT_GOAL := help
+.PHONY: build-image  
 
-GO_VERSION ?= 1.19
-LINT_VERSION ?= 1.50.0
-ARCH = amd64
+DATE = $(shell date +%s)
+NAME = "testcases_$(DATE)"
 
-BIN = bin
-RELEASE = release
-DIRS = $(BIN) $(RELEASE)
-
-# List of binaries to build.
-CMDS = $(notdir $(basename $(wildcard cmd/*)))
-BINS = $(addprefix $(BIN)/, $(CMDS))
-
-# .deb package versioning
-OS_RELEASE = $(shell lsb_release -cs)
-PKG_VERSION ?= $(shell echo $(VERSION) | sed "s/^v//" | \
-			sed -E "s/(.*)-(g[a-fA-F0-9]{6,8})(.*)/\1\3~\2/" | \
-			sed "s/-/~/")-${OS_RELEASE}
-
-.PHONY: help all images dep clean fmts fmt imports test lint docker/lint
-		prepare-release debpackage
-
-# To build a specific binary, use it's name prefix with bin/ as a target
-# For example `make bin/frostfs-node` will build only storage node binary
-# Just `make` will build all possible binaries
-all: $(DIRS) $(BINS)
-
-# help target
-include help.mk
-
-$(BINS): $(DIRS) dep
-	@echo "⇒ Build $@"
-	CGO_ENABLED=0 \
-	go build -v -trimpath \
-	-ldflags "-X $(REPO)/misc.Version=$(VERSION)" \
-	-o $@ ./cmd/$(notdir $@)
-
-$(DIRS):
-	@echo "⇒ Ensure dir: $@"
-	@mkdir -p $@
-
-# Prepare binaries and archives for release
-.ONESHELL:
-prepare-release: docker/all
-	@for file in `ls -1 $(BIN)/frostfs-*`; do
-		cp $$file $(RELEASE)/`basename $$file`-$(ARCH)
-		strip $(RELEASE)/`basename $$file`-$(ARCH)
-		tar -czf $(RELEASE)/`basename $$file`-$(ARCH).tar.gz $(RELEASE)/`basename $$file`-$(ARCH)
-	done
-
-# Pull go dependencies
-dep:
-	@printf "⇒ Download requirements: "
-	CGO_ENABLED=0 \
-	go mod download && echo OK
-	@printf "⇒ Tidy requirements : "
-	CGO_ENABLED=0 \
-	go mod tidy -v && echo OK
-
-# Regenerate proto files:
-protoc:
-	@GOPRIVATE=github.com/TrueCloudLab go mod vendor
-	# Install specific version for protobuf lib
-	@go list -f '{{.Path}}/...@{{.Version}}' -m  github.com/golang/protobuf | xargs go install -v
-	@GOBIN=$(abspath $(BIN)) go install -mod=mod -v github.com/TrueCloudLab/frostfs-api-go/v2/util/protogen
-	# Protoc generate
-	@for f in `find . -type f -name '*.proto' -not -path './vendor/*'`; do \
-		echo "⇒ Processing $$f "; \
-		protoc \
-			--proto_path=.:./vendor:/usr/local/include \
-			--plugin=protoc-gen-go-frostfs=$(BIN)/protogen \
-			--go-frostfs_out=. --go-frostfs_opt=paths=source_relative \
-			--go_out=. --go_opt=paths=source_relative \
-			--go-grpc_opt=require_unimplemented_servers=false \
-			--go-grpc_out=. --go-grpc_opt=paths=source_relative $$f; \
-	done
-	rm -rf vendor
-
-# Build FrostFS component's docker image
-image-%:
-	@echo "⇒ Build FrostFS $* docker image "
+build:
+	@echo "${B}${G}⇒ Build image ${R}"
 	@docker build \
-		--build-arg REPO=$(REPO) \
-		--build-arg VERSION=$(VERSION) \
-		--rm \
-		-f .docker/Dockerfile.$* \
-		-t $(HUB_IMAGE)-$*:$(HUB_TAG) .
+		 --build-arg REG_USR=$(REG_USR) \
+		 --build-arg REG_PWD=$(REG_PWD) \
+		 --build-arg JF_TOKEN=$(JF_TOKEN) \
+		 --build-arg BUILD_NEOFS_NODE=${BUILD_NEOFS_NODE} \
+		 --build-arg BUILD_CLI=${BUILD_CLI} \
+		 -f Dockerfile \
+		 -t robot:$(VERSION)$(PREFIX) .
+ 
+run_docker:
+	@echo "${B}${G}⇒ Test Run image $(NAME)${R}"
+	@mkdir artifacts_$(NAME)
+	@docker run --privileged=true  \
+				--name $(NAME) \
+				--volume artifacts_$(NAME):/artifacts \
+				--add-host bastion.localtest.nspcc.ru:192.168.123.10 \
+				--add-host bastion.localtest.nspcc.ru:192.168.123.10 \
+				--add-host cdn.fs.localtest.nspcc.ru:192.168.123.40 \
+				--add-host main_chain.fs.localtest.nspcc.ru:192.168.123.50 \
+				--add-host fs.localtest.nspcc.ru:192.168.123.20 \
+				--add-host m01.fs.localtest.nspcc.ru:192.168.123.61 \
+				--add-host m02.fs.localtest.nspcc.ru:192.168.123.62 \
+				--add-host m03.fs.localtest.nspcc.ru:192.168.123.63 \
+				--add-host m04.fs.localtest.nspcc.ru:192.168.123.64 \
+				--add-host send.fs.localtest.nspcc.ru:192.168.123.30 \
+				--add-host s01.fs.localtest.nspcc.ru:192.168.123.71 \
+				--add-host s02.fs.localtest.nspcc.ru:192.168.123.72 \
+				--add-host s03.fs.localtest.nspcc.ru:192.168.123.73 \
+				--add-host s04.fs.localtest.nspcc.ru:192.168.123.74 \
+				robot:$(VERSION)$(PREFIX) ./dockerd.sh &
+	@sleep 10;
+	@docker wait $(NAME);
+	@echo "${B}${G}⇒ Testsuite has been completed. ${R}";
+	@echo "${B}${G}⇒ Copy Logs from container to ./artifacts/ ${R}";
+	@docker cp $(NAME):/artifacts .
+	@docker rm $(NAME)
 
-# Build all Docker images
-images: image-storage image-ir image-cli image-adm image-storage-testnet
+run:
+	@echo "${B}${G}⇒ Test Run ${R}"
+	@robot --timestampoutputs --outputdir artifacts/ robot/testsuites/integration/object_suite.robot 
 
-# Build dirty local Docker images
-dirty-images: image-dirty-storage image-dirty-ir image-dirty-cli image-dirty-adm
+help:
+	@echo "${B}${G}⇒ build        Build image ${R}" 
+	@echo "${B}${G}⇒ run          Run testcases ${R}" 
+	@echo "${B}${G}⇒ run_docker   Run in docker ${R}" 
 
-# Run `make %` in Golang container
-docker/%:
-	docker run --rm -t \
-	-v `pwd`:/src \
-	-w /src \
-	-u "$$(id -u):$$(id -g)" \
-	--env HOME=/src \
-	golang:$(GO_VERSION) make $*
-
-
-# Run all code formatters
-fmts: fmt imports
-
-# Reformat code
-fmt:
-	@echo "⇒ Processing gofmt check"
-	@gofmt -s -w cmd/ pkg/ misc/
-
-# Reformat imports
-imports:
-	@echo "⇒ Processing goimports check"
-	@goimports -w cmd/ pkg/ misc/
-
-# Run Unit Test with go test
-test:
-	@echo "⇒ Running go test"
-	@go test ./...
-
-# Run linters
-lint:
-	@golangci-lint --timeout=5m run
-
-# Run linters in Docker
-docker/lint:
-	docker run --rm -t \
-	-v `pwd`:/src \
-	-u `stat -c "%u:%g" .` \
-	--env HOME=/src \
-	golangci/golangci-lint:v$(LINT_VERSION) bash -c 'cd /src/ && make lint'
-
-# Print version
-version:
-	@echo $(VERSION)
-
-clean:
-	rm -rf vendor
-	rm -rf .cache
-	rm -rf $(BIN)
-	rm -rf $(RELEASE)
-
-# Package for Debian
-debpackage:
-	dch --package frostfs-node \
-			--controlmaint \
-			--newversion $(PKG_VERSION) \
-			--distribution $(OS_RELEASE) \
-			"Please see CHANGELOG.md for code changes for $(VERSION)"
-	dpkg-buildpackage --no-sign -b
-
-debclean:
-	dh clean

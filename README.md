@@ -1,8 +1,49 @@
-# README #
 
-This README would normally document whatever steps are necessary to get your application up and running.
+# Локальный запуск тесткейсов
+1. Устаносить зависимости (только для первого запуска):
+    - pip3 install robotframework
+    - pip3 install neocore
+    - pip3 install requests
 
-### What is this repository for? ###
+(pip3 заменить на соответсвующий менеджер пакетов python в системе).
+
+При этом должен быть запущен dev-env с тестируемым окружением.
+
+2. Выпольнить `make run`
+
+3. Логи будут доступны в папке artifacts/ после завершения тестов с любым из статусов.
+
+
+### Запуск тесткейсов в докере
+1. Задать переменные окружения для работы с dev-env:
+```
+    export REG_USR=<registry_user>
+    export REG_PWD=<registry_pass>
+    export JF_TOKEN=<JF_token>
+```
+
+2. Выполнить `make build`
+
+3. Выполнить `make run_docker`
+
+4. Логи будут доступны в папке artifacts/ после завершения тестов с любым из статусов.
+
+### Запуск тесткейсов в докере с произвольными коммитами
+
+На данный момент доступны произовльные коммиты для NeoFS Node и NeoFS CLI.
+Для этого достаточно задать переменные окружения перед запуском `make build`.
+```
+export BUILD_NEOFS_NODE=<commit or branch>
+export BUILD_CLI=<commit or branch>
+```
+
+## README #
+
+Чтобы тесты из этого репозитория были доступны к запуску из Drone CI,
+они должны быть упакованы в docker-имадж. Это делается в рамках CI,
+сконфигурированного в этом репозитории. Вся сборка "тестового образа"
+описывается в файлах `Dockerfile` и `.drone.yml` и осуществляется на
+каждый пуш в master.
 
 * Quick summary
 * Version
@@ -113,6 +154,8 @@ Please see [CREDITS](CREDITS.md) for details.
 # License
 
 - [GNU General Public License v3.0](LICENSE)
+
+
 
 * Repo owner or admin
 * Other community or team contact
