@@ -13,7 +13,6 @@ from robot.api.deco import keyword
 from robot.api import logger
 import robot.errors
 from robot.libraries.BuiltIn import BuiltIn
-from neocore.KeyPair import KeyPair
 
 ROBOT_AUTO_KEYWORDS = False
 
