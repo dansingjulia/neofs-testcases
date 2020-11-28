@@ -15,8 +15,6 @@ import robot.errors
 from robot.libraries.BuiltIn import BuiltIn
 from neocore.KeyPair import KeyPair
 
-from Crypto import Random
-
 ROBOT_AUTO_KEYWORDS = False
 
 if os.getenv('ROBOT_PROFILE') == 'selectel_smoke':
@@ -57,7 +55,6 @@ def generate_wallet(wallet: str):
 
 @keyword('Dump Address')
 def dump_address(wallet: str):
-    #"address": "Ngde6LSaBZ58p72trTNkgqEZmX8dTWBgHo",
     address = ""
     cmd = ( f"{NEOGO_CLI_PREFIX} wallet dump -w {wallet}" )
 
@@ -83,7 +80,8 @@ def dump_privkey(wallet: str, address: str):
 
     return out
 
-@keyword('Transfer Mainnet Gas')
+
+@keyword('Transfer Mainnet Gas') 
 def transfer_mainnet_gas(wallet: str, address: str, address_to: str, amount: int):
     cmd = ( f"{NEOGO_CLI_PREFIX} wallet nep5 transfer -w {wallet} -r http://main_chain.neofs.devenv:30333 --from {address} "
             f"--to {address_to} --token gas --amount {amount}" )
@@ -97,7 +95,7 @@ def transfer_mainnet_gas(wallet: str, address: str, address_to: str, amount: int
 
     return out
 
-@keyword('Withdraw Mainnet Gas')
+@keyword('Withdraw Mainnet Gas') 
 def withdraw_mainnet_gas(wallet: str, address: str, scripthash: str, amount: int):
     cmd = ( f"{NEOGO_CLI_PREFIX} contract invokefunction -w {wallet} -a {address} -r http://main_chain.neofs.devenv:30333 "
             f"{NEOFS_CONTRACT} withdraw {scripthash} int:{amount}  -- {scripthash}" )
@@ -110,6 +108,8 @@ def withdraw_mainnet_gas(wallet: str, address: str, scripthash: str, amount: int
     #    raise Exception("Can not get Tx.")
 
     return out
+
+
 
 @keyword('Mainnet Balance')
 def mainnet_balance(address: str):
@@ -140,6 +140,8 @@ def expected_mainnet_balance(address: str, expected: int):
 
     return True
 
+
+
 @keyword('NeoFS Deposit')
 def neofs_deposit(wallet: str, address: str, scripthash: str, amount: int, wallet_pass:str=''):
     cmd = ( f"{NEOGO_CLI_PREFIX} contract invokefunction -w {wallet} -a {address} "
@@ -156,8 +158,6 @@ def neofs_deposit(wallet: str, address: str, scripthash: str, amount: int, walle
 
     tx = m.group(1)
 
-    # Sent invocation transaction
-
     return tx
 
 @keyword('Transaction accepted in block')
@@ -170,7 +170,7 @@ def transaction_accepted_in_block(tx_id):
     """
 
     logger.info("Transaction id: %s" % tx_id)
-
+    
     TX_request = 'curl -X POST '+NEO_MAINNET_ENDPOINT+' --cacert ca/nspcc-ca.pem -H \'Content-Type: application/json\' -d \'{ "jsonrpc": "2.0", "id": 5, "method": "gettransactionheight", "params": [\"'+ tx_id +'\"] }\''
 
     logger.info(f"Executing command: {TX_request}")
