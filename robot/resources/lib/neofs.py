@@ -161,9 +161,6 @@ def validate_storage_policy_for_object(private_key: str, expected_copies: int, c
             raise Exception("Found node list '{}' is not equal to expected list '{}'".format(found_nodes, expected_node_list))
 
 
-
-
-
 @keyword('Get eACL')
 def get_eacl(private_key: str, cid: str):
 
@@ -917,8 +914,11 @@ def cleanup_file(filename: str):
 
 
 @keyword('Put object to NeoFS')
-def put_object(private_key: str, path: str, cid: str, bearer: str, user_headers: str):
+def put_object(private_key: str, path: str, cid: str, bearer: str, user_headers: str, endpoint: str="" ):
     logger.info("Going to put the object")
+
+    if not endpoint:
+      endpoint = random.sample(_get_storage_nodes(private_key), 1)[0]
 
     if user_headers:
         user_headers = f"--attributes {user_headers}"
@@ -926,7 +926,7 @@ def put_object(private_key: str, path: str, cid: str, bearer: str, user_headers:
     if bearer:
         bearer = f"--bearer {bearer}"
 
-    putObjectCmd = f'neofs-cli --rpc-endpoint {NEOFS_ENDPOINT} --key {private_key} object put --file {path} --cid {cid} {bearer} {user_headers}'
+    putObjectCmd = f'neofs-cli --rpc-endpoint {endpoint} --key {private_key} object put --file {path} --cid {cid} {bearer} {user_headers}'
     logger.info("Cmd: %s" % putObjectCmd)
 
     try:
@@ -956,13 +956,21 @@ def get_range_hash(private_key: str, cid: str, oid: str, bearer_token: str, rang
     except subprocess.CalledProcessError as e:
         raise Exception("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
 
-@keyword('Get object from NeoFS')
-def get_object(private_key: str, cid: str, oid: str, bearer_token: str, read_object: str):
 
+@keyword('Get object from NeoFS') 
+def get_object(private_key: str, cid: str, oid: str, bearer_token: str, read_object: str, endpoint: str="" ):
+    # TODO: add object return instead of read_object (uuid)
+
+    logger.info("Going to put the object")
+
+    if not endpoint:
+      endpoint = random.sample(_get_storage_nodes(private_key), 1)[0]
+
+    
     if bearer_token:
         bearer_token = f"--bearer {bearer_token}"
 
-    ObjectCmd = f'neofs-cli --rpc-endpoint {NEOFS_ENDPOINT} --key {private_key} object get --cid {cid} --oid {oid} --file {read_object} {bearer_token}'
+    ObjectCmd = f'neofs-cli --rpc-endpoint {endpoint} --key {private_key} object get --cid {cid} --oid {oid} --file {read_object} {bearer_token}'
 
     logger.info("Cmd: %s" % ObjectCmd)
     try:
