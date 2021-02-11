@@ -403,6 +403,25 @@ def search_object(private_key: str, cid: str, keys: str, bearer: str, filters: s
     except subprocess.CalledProcessError as e:
         raise Exception("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
 
+@keyword('Get Split objects')
+def get_component_objects(private_key: str, cid: str, oid: str):
+
+    logger.info("Collect Split objects list from Linked object.")
+    nodes = _get_storage_nodes()
+    for node in nodes:
+        header_virtual = head_object(private_key, cid, oid, '', '', '--raw --ttl 1', node, True)
+        parsed_header_virtual = parse_object_virtual_raw_header(header_virtual)
+
+        if 'Linking object' in parsed_header_virtual.keys():
+
+            header_link = head_object(private_key, cid, parsed_header_virtual['Linking object'], '', '', '--raw')
+            header_link_parsed = parse_object_system_header(header_link)
+            
+            return header_link_parsed['Split ChildID']
+
+    raise Exception("Linking object has not been found.")
+
+
 @keyword('Verify Split Chain')
 def verify_split_chain(private_key: str, cid: str, oid: str):
 
@@ -921,7 +940,7 @@ def get_range_hash(private_key: str, cid: str, oid: str, bearer_token: str,
     logger.info("Cmd: %s" % ObjectCmd)
     try:
         complProc = subprocess.run(ObjectCmd, check=True, universal_newlines=True,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60, shell=True)
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120, shell=True)
         logger.info("Output: %s" % complProc.stdout)
     except subprocess.CalledProcessError as e:
         raise Exception("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
@@ -965,7 +984,7 @@ def put_storagegroup(private_key: str, cid: str, *oid_list):
     logger.info(f"Cmd: {ObjectCmd}")
     try:
         complProc = subprocess.run(ObjectCmd, check=True, universal_newlines=True,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, shell=True)
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60, shell=True)
         logger.info(f"Output: {complProc.stdout}" )
 
         oid = _parse_oid(complProc.stdout)
@@ -1006,7 +1025,7 @@ def get_storagegroup(private_key: str, cid: str, oid: str, expected_size, *expec
     logger.info(f"Cmd: {ObjectCmd}")
     try:
         complProc = subprocess.run(ObjectCmd, check=True, universal_newlines=True,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, shell=True)
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60, shell=True)
         logger.info(f"Output: {complProc.stdout}")
       
         if expected_size:
@@ -1038,7 +1057,7 @@ def delete_storagegroup(private_key: str, cid: str, oid: str):
     logger.info(f"Cmd: {ObjectCmd}")
     try:
         complProc = subprocess.run(ObjectCmd, check=True, universal_newlines=True,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, shell=True)
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60, shell=True)
         logger.info(f"Output: {complProc.stdout}")
 
         m = re.search(r'Tombstone: ([a-zA-Z0-9-]+)', complProc.stdout)
