@@ -39,3 +39,5 @@ testfile
 # ignore pycache under any path
 **/__pycache__
 TemporaryDir/*
+artifacts/*
+docs/*
