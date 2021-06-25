@@ -35,6 +35,7 @@ testfile
 **/log.html
 **/output.xml
 **/report.html
+**/dockerlogs*.tar.gz
 
 # ignore pycache under any path
 **/__pycache__
