@@ -4,7 +4,7 @@ on:
   pull_request:
     branches:
       - master
-      - support/**
+      - develop
 
 jobs:
   commits_check_job:
