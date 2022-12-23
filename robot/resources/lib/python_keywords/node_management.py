@@ -169,7 +169,7 @@ def exclude_node_from_network_map(
     storage_node_set_status(node_to_exclude, status="offline")
 
     time.sleep(parse_time(MORPH_BLOCK_TIME))
-    tick_epoch(shell, cluster)
+    tick_epoch(cluster.storage_nodes[0].host.get_shell(), cluster)
 
     snapshot = get_netmap_snapshot(node=alive_node, shell=shell)
     assert (
@@ -190,7 +190,7 @@ def include_node_to_network_map(
     # First sleep can be omitted after https://github.com/nspcc-dev/neofs-node/issues/1790 complete.
 
     time.sleep(parse_time(MORPH_BLOCK_TIME) * 2)
-    tick_epoch(shell, cluster)
+    tick_epoch(cluster.storage_nodes[0].host.get_shell(), cluster)
     time.sleep(parse_time(MORPH_BLOCK_TIME) * 2)
 
     check_node_in_map(node_to_include, shell, alive_node)

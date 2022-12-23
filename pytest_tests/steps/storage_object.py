@@ -46,7 +46,7 @@ def delete_objects(
                 endpoint=cluster.default_rpc_endpoint,
             )
 
-    tick_epoch(shell, cluster)
+    tick_epoch(cluster.storage_nodes[0].host.get_shell(), cluster)
     sleep(CLEANUP_TIMEOUT)
 
     with allure.step("Get objects and check errors"):

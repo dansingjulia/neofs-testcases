@@ -16,10 +16,12 @@ class ClusterTestBase:
         yield
 
     def tick_epoch(self):
-        epoch.tick_epoch(self.shell, self.cluster)
+        epoch.tick_epoch(self.cluster.storage_nodes[0].host.get_shell(), self.cluster)
 
     def get_epoch(self):
-        return epoch.get_epoch(self.shell, self.cluster)
+        return epoch.get_epoch(self.cluster.storage_nodes[0].host.get_shell(), self.cluster)
 
     def ensure_fresh_epoch(self):
-        return epoch.ensure_fresh_epoch(self.shell, self.cluster)
+        return epoch.ensure_fresh_epoch(
+            self.cluster.storage_nodes[0].host.get_shell(), self.cluster
+        )

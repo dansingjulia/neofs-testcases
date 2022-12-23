@@ -92,13 +92,13 @@ def locked_storage_object(
     yield storage_object
 
     with allure.step("Delete created locked object"):
-        current_epoch = get_epoch(client_shell, cluster)
+        current_epoch = get_epoch(cluster.storage_nodes[0].host.get_shell(), cluster)
         epoch_diff = expiration_epoch - current_epoch + 1
 
         if epoch_diff > 0:
             with allure.step(f"Tick {epoch_diff} epochs"):
                 for _ in range(epoch_diff):
-                    tick_epoch(client_shell, cluster)
+                    tick_epoch(cluster.storage_nodes[0].host.get_shell(), cluster)
         try:
             delete_object(
                 storage_object.wallet_file_path,
