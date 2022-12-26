@@ -181,7 +181,7 @@ class MainChain(NodeBase):
         self.rpc_client = RPCClient(self.get_endpoint())
 
     def get_endpoint(self) -> str:
-        return self._get_attribute(_ConfigAttributes.ENDPOINT_DATA)
+        return self._get_attribute(_ConfigAttributes.ENDPOINT_INTERNAL)
 
     @property
     def label(self) -> str:

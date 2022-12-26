@@ -48,7 +48,7 @@ def tick_epoch(shell: Shell, cluster: Cluster):
     if NEOFS_ADM_EXEC and NEOFS_ADM_CONFIG_PATH:
         # If neofs-adm is available, then we tick epoch with it (to be consistent with UAT tests)
         neofsadm = NeofsAdm(
-            shell=shell, neofs_adm_exec_path=NEOFS_ADM_EXEC, config_file="/tmp/config.yaml"
+            shell=shell, neofs_adm_exec_path=NEOFS_ADM_EXEC, config_file=NEOFS_ADM_CONFIG_PATH
         )
         neofsadm.morph.force_new_epoch()
         return
