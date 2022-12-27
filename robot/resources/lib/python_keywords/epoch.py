@@ -1,8 +1,10 @@
 import logging
 from time import sleep
 from typing import Optional
+from typing import Optional
 
 import allure
+from cluster import Cluster, StorageNode
 from cluster import Cluster, StorageNode
 from common import (
     MAINNET_BLOCK_TIME,
@@ -80,6 +82,8 @@ def tick_epoch(shell: Shell, cluster: Cluster, alive_node: Optional[StorageNode]
 
     morph_chain = cluster.morph_chain_nodes[0]
     morph_endpoint = morph_chain.get_endpoint()
+
+    # remote_ir_wallet_path = ir_node.get_remote_wallet_path()
 
     neogo = NeoGo(shell, neo_go_exec_path=NEOGO_EXECUTABLE)
     neogo.contract.invokefunction(
