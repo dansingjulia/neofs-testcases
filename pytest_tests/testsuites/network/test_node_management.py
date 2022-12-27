@@ -473,7 +473,7 @@ class TestNodeManagement(ClusterTestBase):
             copies = get_simple_object_copies(wallet, cid, oid, self.shell, nodes)
             if copies == expected_copies:
                 break
-            tick_epoch(self.cluster.storage_nodes[0].host.get_shell(), self.cluster)
+            tick_epoch(self.shell, self.cluster)
             sleep(parse_time(NEOFS_CONTRACT_CACHE_TIMEOUT))
         else:
             raise AssertionError(f"There are no {expected_copies} copies during time")

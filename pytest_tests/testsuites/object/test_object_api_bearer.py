@@ -62,7 +62,7 @@ def storage_objects(
     client_shell: Shell,
     cluster: Cluster,
 ) -> list[StorageObjectInfo]:
-    epoch = get_epoch(cluster.storage_nodes[0].host.get_shell(), cluster)
+    epoch = get_epoch(client_shell, cluster)
     storage_objects: list[StorageObjectInfo] = []
     for node in cluster.storage_nodes:
         storage_objects.append(

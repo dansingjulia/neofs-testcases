@@ -1,9 +1,9 @@
-import json
 import logging
 from time import sleep
+from typing import Optional
 
 import allure
-from cluster import Cluster
+from cluster import Cluster, StorageNode
 from common import (
     MAINNET_BLOCK_TIME,
     NEOFS_ADM_CONFIG_PATH,
@@ -21,20 +21,23 @@ logger = logging.getLogger("NeoLogger")
 
 
 @allure.step("Ensure fresh epoch")
-def ensure_fresh_epoch(shell: Shell, cluster: Cluster) -> int:
+def ensure_fresh_epoch(
+    shell: Shell, cluster: Cluster, alive_node: Optional[StorageNode] = None
+) -> int:
     # ensure new fresh epoch to avoid epoch switch during test session
-    current_epoch = get_epoch(cluster.storage_nodes[0].host.get_shell(), cluster)
-    tick_epoch(cluster.storage_nodes[0].host.get_shell(), cluster)
-    epoch = get_epoch(cluster.storage_nodes[0].host.get_shell(), cluster)
+    alive_node = alive_node if alive_node else cluster.storage_nodes[0]
+    current_epoch = get_epoch(shell, cluster, alive_node)
+    tick_epoch(shell, cluster, alive_node)
+    epoch = get_epoch(shell, cluster, alive_node)
     assert epoch > current_epoch, "Epoch wasn't ticked"
     return epoch
 
 
 @allure.step("Get Epoch")
-def get_epoch(shell: Shell, cluster: Cluster):
-    storage_node = cluster.storage_nodes[0]
-    wallet_path = storage_node.get_wallet_path()
-    wallet_config = storage_node.get_wallet_config_path()
+def get_epoch(shell: Shell, cluster: Cluster, alive_node: Optional[StorageNode] = None):
+    alive_node = alive_node if alive_node else cluster.storage_nodes[0]
+    wallet_path = alive_node.get_wallet_path()
+    wallet_config = alive_node.get_wallet_config_path()
 
     cli = NeofsCli(shell=shell, neofs_cli_exec_path=NEOFS_CLI_EXEC, config_file=wallet_config)
 
@@ -43,21 +46,32 @@ def get_epoch(shell: Shell, cluster: Cluster):
 
 
 @allure.step("Tick Epoch")
-def tick_epoch(shell: Shell, cluster: Cluster):
+def tick_epoch(shell: Shell, cluster: Cluster, alive_node: Optional[StorageNode] = None):
+    """
+    Tick epoch using neofs-adm or NeoGo if neofs-adm is not available (DevEnv)
+    Args:
+        shell: local shell to make queries about current epoch. Remote shell will be used to tick new one
+        cluster: cluster instance under test
+        alive_node: node to send requests to (first node in cluster by default)
+    """
+
+    alive_node = alive_node if alive_node else cluster.storage_nodes[0]
+    remote_shell = alive_node.host.get_shell()
 
     if NEOFS_ADM_EXEC and NEOFS_ADM_CONFIG_PATH:
         # If neofs-adm is available, then we tick epoch with it (to be consistent with UAT tests)
         neofsadm = NeofsAdm(
-            shell=shell, neofs_adm_exec_path=NEOFS_ADM_EXEC, config_file=NEOFS_ADM_CONFIG_PATH
+            shell=remote_shell,
+            neofs_adm_exec_path=NEOFS_ADM_EXEC,
+            config_file=NEOFS_ADM_CONFIG_PATH,
         )
         neofsadm.morph.force_new_epoch()
         return
 
-    # Use first node by default
-
     # Otherwise we tick epoch using transaction
-    cur_epoch = get_epoch(cluster.storage_nodes[0].host.get_shell(), cluster)
+    cur_epoch = get_epoch(shell, cluster)
 
+    # Use first node by default
     ir_node = cluster.ir_nodes[0]
     # In case if no local_wallet_path is provided, we use wallet_path
     ir_wallet_path = ir_node.get_wallet_path()

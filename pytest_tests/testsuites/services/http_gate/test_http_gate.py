@@ -211,7 +211,7 @@ class TestHttpGate(ClusterTestBase):
         file_path = generate_file(simple_object_size)
         oids = []
 
-        curr_epoch = get_epoch(self.cluster.storage_nodes[0].host.get_shell(), self.cluster)
+        curr_epoch = get_epoch(self.shell, self.cluster)
         epochs = (curr_epoch, curr_epoch + 1, curr_epoch + 2, curr_epoch + 100)
 
         for epoch in epochs:
