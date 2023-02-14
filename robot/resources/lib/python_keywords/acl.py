@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import allure
 import base58
-from common import ASSETS_DIR, NEOFS_CLI_EXEC, NEOFS_ENDPOINT, WALLET_CONFIG
+from common import ASSETS_DIR, NEOFS_CLI_EXEC, WALLET_CONFIG
 from data_formatters import get_wallet_public_key
 from neofs_testlib.cli import NeofsCli
 from neofs_testlib.shell import Shell
@@ -116,10 +116,10 @@ class EACLRule:
 
 
 @allure.title("Get extended ACL")
-def get_eacl(wallet_path: str, cid: str, shell: Shell) -> Optional[str]:
+def get_eacl(wallet_path: str, cid: str, shell: Shell, endpoint: str) -> Optional[str]:
     cli = NeofsCli(shell, NEOFS_CLI_EXEC, WALLET_CONFIG)
     try:
-        result = cli.container.get_eacl(wallet=wallet_path, rpc_endpoint=NEOFS_ENDPOINT, cid=cid)
+        result = cli.container.get_eacl(wallet=wallet_path, rpc_endpoint=endpoint, cid=cid)
     except RuntimeError as exc:
         logger.info("Extended ACL table is not set for this container")
         logger.info(f"Got exception while getting eacl: {exc}")
@@ -130,14 +130,22 @@ def get_eacl(wallet_path: str, cid: str, shell: Shell) -> Optional[str]:
 
 
 @allure.title("Set extended ACL")
-def set_eacl(wallet_path: str, cid: str, eacl_table_path: str, shell: Shell) -> None:
+def set_eacl(
+    wallet_path: str,
+    cid: str,
+    eacl_table_path: str,
+    shell: Shell,
+    endpoint: str,
+    session_token: Optional[str] = None,
+) -> None:
     cli = NeofsCli(shell, NEOFS_CLI_EXEC, WALLET_CONFIG)
     cli.container.set_eacl(
         wallet=wallet_path,
-        rpc_endpoint=NEOFS_ENDPOINT,
+        rpc_endpoint=endpoint,
         cid=cid,
         table=eacl_table_path,
         await_mode=True,
+        session=session_token,
     )
 
 
@@ -159,17 +167,22 @@ def create_eacl(cid: str, rules_list: List[EACLRule], shell: Shell) -> str:
 
 
 def form_bearertoken_file(
-    wif: str, cid: str, eacl_rule_list: List[Union[EACLRule, EACLPubKey]], shell: Shell
+    wif: str,
+    cid: str,
+    eacl_rule_list: List[Union[EACLRule, EACLPubKey]],
+    shell: Shell,
+    endpoint: str,
+    sign: Optional[bool] = True,
 ) -> str:
     """
     This function fetches eACL for given <cid> on behalf of <wif>,
     then extends it with filters taken from <eacl_rules>, signs
     with bearer token and writes to file
     """
-    enc_cid = _encode_cid_for_eacl(cid)
+    enc_cid = _encode_cid_for_eacl(cid) if cid else None
     file_path = os.path.join(os.getcwd(), ASSETS_DIR, str(uuid.uuid4()))
 
-    eacl = get_eacl(wif, cid, shell=shell)
+    eacl = get_eacl(wif, cid, shell, endpoint)
     json_eacl = dict()
     if eacl:
         eacl = eacl.replace("eACL: ", "").split("Signature")[0]
@@ -177,7 +190,7 @@ def form_bearertoken_file(
     logger.info(json_eacl)
     eacl_result = {
         "body": {
-            "eaclTable": {"containerID": {"value": enc_cid}, "records": []},
+            "eaclTable": {"containerID": {"value": enc_cid} if cid else enc_cid, "records": []},
             "lifetime": {"exp": EACL_LIFETIME, "nbf": "1", "iat": "0"},
         }
     }
@@ -207,7 +220,14 @@ def form_bearertoken_file(
         json.dump(eacl_result, eacl_file, ensure_ascii=False, indent=4)
 
     logger.info(f"Got these extended ACL records: {eacl_result}")
-    sign_bearer(shell, wif, file_path)
+    if sign:
+        sign_bearer(
+            shell=shell,
+            wallet_path=wif,
+            eacl_rules_file_from=file_path,
+            eacl_rules_file_to=file_path,
+            json=True,
+        )
     return file_path
 
 
@@ -234,10 +254,12 @@ def eacl_rules(access: str, verbs: list, user: str) -> list[str]:
     return rules
 
 
-def sign_bearer(shell: Shell, wallet_path: str, eacl_rules_file: str) -> None:
+def sign_bearer(
+    shell: Shell, wallet_path: str, eacl_rules_file_from: str, eacl_rules_file_to: str, json: bool
+) -> None:
     neofscli = NeofsCli(shell=shell, neofs_cli_exec_path=NEOFS_CLI_EXEC, config_file=WALLET_CONFIG)
     neofscli.util.sign_bearer_token(
-        wallet=wallet_path, from_file=eacl_rules_file, to_file=eacl_rules_file, json=True
+        wallet=wallet_path, from_file=eacl_rules_file_from, to_file=eacl_rules_file_to, json=json
     )
 
 
@@ -245,3 +267,12 @@ def sign_bearer(shell: Shell, wallet_path: str, eacl_rules_file: str) -> None:
 def wait_for_cache_expired():
     sleep(NEOFS_CONTRACT_CACHE_TIMEOUT)
     return
+
+
+@allure.step("Return bearer token in base64 to caller")
+def bearer_token_base64_from_file(
+    bearer_path: str,
+) -> str:
+    with open(bearer_path, "rb") as file:
+        signed = file.read()
+    return base64.b64encode(signed).decode("utf-8")

@@ -1,27 +1,25 @@
-import logging
 from dataclasses import dataclass
-from time import sleep, time
-
-import allure
-import pytest
-from common import NEOFS_NETMAP, STORAGE_NODE_SERVICE_NAME_REGEX
-from epoch import tick_epoch
-from grpc_responses import OBJECT_ALREADY_REMOVED
-from neofs_testlib.hosting import Hosting
-from neofs_testlib.shell import Shell
-from python_keywords.neofs_verbs import delete_object, get_object, head_object
-from tombstone import verify_head_tombstone
-
-logger = logging.getLogger("NeoLogger")
+from typing import Optional
 
 
 @dataclass
-class StorageObjectInfo:
-    size: str = None
-    cid: str = None
-    wallet: str = None
-    file_path: str = None
-    file_hash: str = None
-    attributes: list[dict[str, str]] = None
-    oid: str = None
-    tombstone: str = None
+class ObjectRef:
+    cid: str
+    oid: str
+
+
+@dataclass
+class LockObjectInfo(ObjectRef):
+    lifetime: Optional[int] = None
+    expire_at: Optional[int] = None
+
+
+@dataclass
+class StorageObjectInfo(ObjectRef):
+    size: Optional[int] = None
+    wallet_file_path: Optional[str] = None
+    file_path: Optional[str] = None
+    file_hash: Optional[str] = None
+    attributes: Optional[list[dict[str, str]]] = None
+    tombstone: Optional[str] = None
+    locks: Optional[list[LockObjectInfo]] = None

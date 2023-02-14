@@ -1,18 +1,16 @@
 import logging
 import os
 import uuid
-from enum import Enum
 from time import sleep
 from typing import Optional
 
 import allure
 import pytest
 import urllib3
+from aws_cli_client import AwsCliClient
 from botocore.exceptions import ClientError
 from cli_helpers import log_command_execution
-
-from steps.aws_cli_client import AwsCliClient
-from steps.s3_gate_bucket import S3_SYNC_WAIT_TIME
+from s3_gate_bucket import S3_SYNC_WAIT_TIME
 
 ##########################################################
 # Disabling warnings on self-signed certificate which the
@@ -79,6 +77,21 @@ def list_objects_versions_s3(s3_client, bucket: str, full_output: bool = False) 
         versions = response.get("Versions", [])
         log_command_execution("S3 List objects versions result", response)
         return response if full_output else versions
+
+    except ClientError as err:
+        raise Exception(
+            f'Error Message: {err.response["Error"]["Message"]}\n'
+            f'Http status code: {err.response["ResponseMetadata"]["HTTPStatusCode"]}'
+        ) from err
+
+
+@allure.step("List objects delete markers S3")
+def list_objects_delete_markers_s3(s3_client, bucket: str, full_output: bool = False) -> list:
+    try:
+        response = s3_client.list_object_versions(Bucket=bucket)
+        delete_markers = response.get("DeleteMarkers", [])
+        log_command_execution("S3 List objects delete markers result", response)
+        return response if full_output else delete_markers
 
     except ClientError as err:
         raise Exception(
@@ -178,6 +191,27 @@ def delete_object_versions_s3(s3_client, bucket: str, object_versions: list):
         }
         response = s3_client.delete_objects(Bucket=bucket, Delete=delete_list)
         log_command_execution("S3 Delete objects result", response)
+        return response
+
+    except ClientError as err:
+        raise Exception(
+            f'Error Message: {err.response["Error"]["Message"]}\n'
+            f'Http status code: {err.response["ResponseMetadata"]["HTTPStatusCode"]}'
+        ) from err
+
+
+@allure.step("Delete object versions S3 without delete markers")
+def delete_object_versions_s3_without_dm(s3_client, bucket: str, object_versions: list):
+    try:
+        # Delete objects without creating delete markers
+        for object_version in object_versions:
+            params = {
+                "Bucket": bucket,
+                "Key": object_version["Key"],
+                "VersionId": object_version["VersionId"],
+            }
+            response = s3_client.delete_object(**params)
+            log_command_execution("S3 Delete object result", response)
         return response
 
     except ClientError as err:

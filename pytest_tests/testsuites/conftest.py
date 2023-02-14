@@ -9,15 +9,38 @@ import allure
 import pytest
 import yaml
 from binary_version_helper import get_local_binaries_versions, get_remote_binaries_versions
-from common import ASSETS_DIR, FREE_STORAGE, HOSTING_CONFIG_FILE, NEOFS_NETMAP_DICT, WALLET_PASS
+from cluster import Cluster
+from common import (
+    ASSETS_DIR,
+    COMPLEX_OBJECT_CHUNKS_COUNT,
+    COMPLEX_OBJECT_TAIL_SIZE,
+    FREE_STORAGE,
+    HOSTING_CONFIG_FILE,
+    SIMPLE_OBJECT_SIZE,
+    STORAGE_NODE_SERVICE_NAME_REGEX,
+    WALLET_PASS,
+)
 from env_properties import save_env_properties
+from k6 import LoadParams
+from load import get_services_endpoints, prepare_k6_instances
+from load_params import (
+    BACKGROUND_LOAD_MAX_TIME,
+    BACKGROUND_OBJ_SIZE,
+    BACKGROUND_READERS_COUNT,
+    BACKGROUND_WRITERS_COUNT,
+    LOAD_NODE_SSH_PRIVATE_KEY_PATH,
+    LOAD_NODE_SSH_USER,
+    LOAD_NODES,
+)
 from neofs_testlib.hosting import Hosting
 from neofs_testlib.reporter import AllureHandler, get_reporter
 from neofs_testlib.shell import LocalShell, Shell
 from neofs_testlib.utils.wallet import init_wallet
 from payment_neogo import deposit_gas, transfer_gas
-from python_keywords.node_management import node_healthcheck
-from wallet import WalletFactory
+from python_keywords.neofs_verbs import get_netmap_netinfo
+from python_keywords.node_management import storage_node_healthcheck
+
+from helpers.wallet import WalletFactory
 
 logger = logging.getLogger("NeoLogger")
 
@@ -49,6 +72,7 @@ def hosting(configure_testlib) -> Hosting:
 
     hosting_instance = Hosting()
     hosting_instance.configure(hosting_config)
+
     yield hosting_instance
 
 
@@ -64,8 +88,38 @@ def require_multiple_hosts(hosting: Hosting):
 
 
 @pytest.fixture(scope="session")
-def wallet_factory(prepare_tmp_dir: str, client_shell: Shell) -> WalletFactory:
-    return WalletFactory(prepare_tmp_dir, client_shell)
+def max_object_size(cluster: Cluster, client_shell: Shell) -> int:
+    storage_node = cluster.storage_nodes[0]
+    net_info = get_netmap_netinfo(
+        wallet=storage_node.get_wallet_path(),
+        wallet_config=storage_node.get_wallet_config_path(),
+        endpoint=storage_node.get_rpc_endpoint(),
+        shell=client_shell,
+    )
+    yield net_info["maximum_object_size"]
+
+
+@pytest.fixture(scope="session")
+def simple_object_size(max_object_size: int) -> int:
+    yield int(SIMPLE_OBJECT_SIZE) if int(SIMPLE_OBJECT_SIZE) < max_object_size else max_object_size
+
+
+@pytest.fixture(scope="session")
+def complex_object_size(max_object_size: int) -> int:
+    return max_object_size * int(COMPLEX_OBJECT_CHUNKS_COUNT) + int(COMPLEX_OBJECT_TAIL_SIZE)
+
+
+@pytest.fixture(scope="session")
+def wallet_factory(temp_directory: str, client_shell: Shell, cluster: Cluster) -> WalletFactory:
+    return WalletFactory(temp_directory, client_shell, cluster)
+
+
+@pytest.fixture(scope="session")
+def cluster(temp_directory: str, hosting: Hosting) -> Cluster:
+    cluster = Cluster(hosting)
+    if cluster.is_local_devevn():
+        cluster.create_wallet_configs(hosting)
+    yield cluster
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -80,7 +134,7 @@ def check_binary_versions(request, hosting: Hosting, client_shell: Shell):
 
 @pytest.fixture(scope="session")
 @allure.title("Prepare tmp directory")
-def prepare_tmp_dir():
+def temp_directory():
     with allure.step("Prepare tmp directory"):
         full_path = os.path.join(os.getcwd(), ASSETS_DIR)
         shutil.rmtree(full_path, ignore_errors=True)
@@ -94,24 +148,127 @@ def prepare_tmp_dir():
 
 @pytest.fixture(scope="session", autouse=True)
 @allure.title("Collect logs")
-def collect_logs(prepare_tmp_dir, hosting: Hosting):
+def collect_logs(temp_directory, hosting: Hosting):
     start_time = datetime.utcnow()
     yield
     end_time = datetime.utcnow()
 
     # Dump logs to temp directory (because they might be too large to keep in RAM)
-    logs_dir = os.path.join(prepare_tmp_dir, "logs")
-    os.makedirs(logs_dir)
+    logs_dir = os.path.join(temp_directory, "logs")
+    dump_logs(hosting, logs_dir, start_time, end_time)
+    attach_logs(logs_dir)
+    check_logs(logs_dir)
 
-    for host in hosting.hosts:
-        host.dump_logs(logs_dir, since=start_time, until=end_time)
 
-    # Zip all files and attach to Allure because it is more convenient to download a single
-    # zip with all logs rather than mess with individual logs files per service or node
-    logs_zip_file_path = shutil.make_archive(logs_dir, "zip", logs_dir)
-    allure.attach.file(logs_zip_file_path, name="logs.zip", extension="zip")
+@pytest.fixture(scope="session", autouse=True)
+@allure.title("Run health check for all storage nodes")
+def run_health_check(collect_logs, cluster: Cluster):
+    failed_nodes = []
+    for node in cluster.storage_nodes:
+        health_check = storage_node_healthcheck(node)
+        if health_check.health_status != "READY" or health_check.network_status != "ONLINE":
+            failed_nodes.append(node)
 
-    problem_pattern = r"\Wpanic\W|\Woom\W"
+    if failed_nodes:
+        raise AssertionError(f"Nodes {failed_nodes} are not healthy")
+
+
+@pytest.fixture(scope="session")
+def background_grpc_load(client_shell: Shell, hosting: Hosting):
+    registry_file = os.path.join("/tmp/", f"{str(uuid.uuid4())}.bolt")
+    prepare_file = os.path.join("/tmp/", f"{str(uuid.uuid4())}.json")
+    allure.dynamic.title(
+        f"Start background load with parameters: "
+        f"writers = {BACKGROUND_WRITERS_COUNT}, "
+        f"obj_size = {BACKGROUND_OBJ_SIZE}, "
+        f"load_time = {BACKGROUND_LOAD_MAX_TIME}"
+        f"prepare_json = {prepare_file}"
+    )
+    with allure.step("Get endpoints"):
+        endpoints_list = get_services_endpoints(
+            hosting=hosting,
+            service_name_regex=STORAGE_NODE_SERVICE_NAME_REGEX,
+            endpoint_attribute="rpc_endpoint",
+        )
+        endpoints = ",".join(endpoints_list)
+    load_params = LoadParams(
+        endpoint=endpoints,
+        obj_size=BACKGROUND_OBJ_SIZE,
+        registry_file=registry_file,
+        containers_count=1,
+        obj_count=0,
+        out_file=prepare_file,
+        readers=0,
+        writers=BACKGROUND_WRITERS_COUNT,
+        deleters=0,
+        load_time=BACKGROUND_LOAD_MAX_TIME,
+        load_type="grpc",
+    )
+    k6_load_instances = prepare_k6_instances(
+        load_nodes=LOAD_NODES,
+        login=LOAD_NODE_SSH_USER,
+        pkey=LOAD_NODE_SSH_PRIVATE_KEY_PATH,
+        load_params=load_params,
+    )
+    with allure.step("Run background load"):
+        for k6_load_instance in k6_load_instances:
+            k6_load_instance.start()
+    yield
+    with allure.step("Stop background load"):
+        for k6_load_instance in k6_load_instances:
+            k6_load_instance.stop()
+    with allure.step("Verify background load data"):
+        verify_params = LoadParams(
+            endpoint=endpoints,
+            clients=BACKGROUND_READERS_COUNT,
+            registry_file=registry_file,
+            load_time=BACKGROUND_LOAD_MAX_TIME,
+            load_type="verify",
+        )
+        k6_verify_instances = prepare_k6_instances(
+            load_nodes=LOAD_NODES,
+            login=LOAD_NODE_SSH_USER,
+            pkey=LOAD_NODE_SSH_PRIVATE_KEY_PATH,
+            load_params=verify_params,
+            prepare=False,
+        )
+        with allure.step("Run verify background load data"):
+            for k6_verify_instance in k6_verify_instances:
+                k6_verify_instance.start()
+                k6_verify_instance.wait_until_finished(BACKGROUND_LOAD_MAX_TIME)
+
+
+@pytest.fixture(scope="session")
+@allure.title("Prepare wallet and deposit")
+def default_wallet(client_shell: Shell, temp_directory: str, cluster: Cluster):
+    wallet_path = os.path.join(os.getcwd(), ASSETS_DIR, f"{str(uuid.uuid4())}.json")
+    init_wallet(wallet_path, WALLET_PASS)
+    allure.attach.file(wallet_path, os.path.basename(wallet_path), allure.attachment_type.JSON)
+
+    if not FREE_STORAGE:
+        main_chain = cluster.main_chain_nodes[0]
+        deposit = 30
+        transfer_gas(
+            shell=client_shell,
+            amount=deposit + 1,
+            main_chain=main_chain,
+            wallet_to_path=wallet_path,
+            wallet_to_password=WALLET_PASS,
+        )
+        deposit_gas(
+            shell=client_shell,
+            main_chain=main_chain,
+            amount=deposit,
+            wallet_from_path=wallet_path,
+            wallet_from_password=WALLET_PASS,
+        )
+
+    return wallet_path
+
+
+@allure.title("Check logs for OOM and PANIC entries in {logs_dir}")
+def check_logs(logs_dir: str):
+    problem_pattern = r"\Wpanic\W|\Woom\W|\Wtoo many open files\W"
 
     log_file_paths = []
     for directory_path, _, file_names in os.walk(logs_dir):
@@ -123,46 +280,28 @@ def collect_logs(prepare_tmp_dir, hosting: Hosting):
 
     logs_with_problem = []
     for file_path in log_file_paths:
-        with open(file_path, "r") as log_file:
-            if re.search(problem_pattern, log_file.read(), flags=re.IGNORECASE):
-                logs_with_problem.append(file_path)
+        with allure.step(f"Check log file {file_path}"):
+            with open(file_path, "r") as log_file:
+                if re.search(problem_pattern, log_file.read(), flags=re.IGNORECASE):
+                    logs_with_problem.append(file_path)
     if logs_with_problem:
-        raise RuntimeError(f"System logs {', '.join(logs_with_problem)} contain critical errors")
+        raise pytest.fail(f"System logs {', '.join(logs_with_problem)} contain critical errors")
 
 
-@pytest.fixture(scope="session", autouse=True)
-@allure.title("Run health check for all storage nodes")
-def run_health_check(collect_logs, hosting: Hosting):
-    failed_nodes = []
-    for node_name in NEOFS_NETMAP_DICT.keys():
-        health_check = node_healthcheck(hosting, node_name)
-        if health_check.health_status != "READY" or health_check.network_status != "ONLINE":
-            failed_nodes.append(node_name)
+def dump_logs(hosting: Hosting, logs_dir: str, since: datetime, until: datetime) -> None:
+    # Dump logs to temp directory (because they might be too large to keep in RAM)
+    os.makedirs(logs_dir)
 
-    if failed_nodes:
-        raise AssertionError(f"Nodes {failed_nodes} are not healthy")
+    for host in hosting.hosts:
+        with allure.step(f"Dump logs from host {host.config.address}"):
+            try:
+                host.dump_logs(logs_dir, since=since, until=until)
+            except Exception as ex:
+                logger.warning(f"Exception during logs collection: {ex}")
 
 
-@pytest.fixture(scope="session")
-@allure.title("Prepare wallet and deposit")
-def prepare_wallet_and_deposit(client_shell, prepare_tmp_dir):
-    wallet_path = os.path.join(os.getcwd(), ASSETS_DIR, f"{str(uuid.uuid4())}.json")
-    init_wallet(wallet_path, WALLET_PASS)
-    allure.attach.file(wallet_path, os.path.basename(wallet_path), allure.attachment_type.JSON)
-
-    if not FREE_STORAGE:
-        deposit = 30
-        transfer_gas(
-            shell=client_shell,
-            amount=deposit + 1,
-            wallet_to_path=wallet_path,
-            wallet_to_password=WALLET_PASS,
-        )
-        deposit_gas(
-            shell=client_shell,
-            amount=deposit,
-            wallet_from_path=wallet_path,
-            wallet_from_password=WALLET_PASS,
-        )
-
-    return wallet_path
+def attach_logs(logs_dir: str) -> None:
+    # Zip all files and attach to Allure because it is more convenient to download a single
+    # zip with all logs rather than mess with individual logs files per service or node
+    logs_zip_file_path = shutil.make_archive(logs_dir, "zip", logs_dir)
+    allure.attach.file(logs_zip_file_path, name="logs.zip", extension="zip")

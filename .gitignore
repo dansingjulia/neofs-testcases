@@ -1,5 +1,9 @@
 # ignore IDE files
 .vscode
+.idea
+
+.DS_Store
+
 
 # ignore test results
 **/log.html

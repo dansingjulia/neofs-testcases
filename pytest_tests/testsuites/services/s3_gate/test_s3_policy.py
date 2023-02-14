@@ -1,21 +1,11 @@
 import os
-import time
-from datetime import datetime, timedelta
-from random import choice
-from string import ascii_letters
-from typing import Tuple
 
 import allure
 import pytest
-from file_helper import generate_file, generate_file_with_content
+from file_helper import generate_file
 from python_keywords.container import search_container_by_name
 from python_keywords.storage_policy import get_simple_object_copies
-from s3_helper import (
-    assert_object_lock_mode,
-    check_objects_in_bucket,
-    object_key_from_file_path,
-    set_bucket_versioning,
-)
+from s3_helper import check_objects_in_bucket, object_key_from_file_path, set_bucket_versioning
 
 from steps import s3_gate_bucket, s3_gate_object
 from steps.s3_gate_base import TestS3GateBase
@@ -35,10 +25,10 @@ def pytest_generate_tests(metafunc):
 @pytest.mark.s3_gate
 class TestS3GatePolicy(TestS3GateBase):
     @allure.title("Test S3: Verify bucket creation with retention policy applied")
-    def test_s3_bucket_location(self, client_shell):
-        file_path_1 = generate_file()
+    def test_s3_bucket_location(self, simple_object_size):
+        file_path_1 = generate_file(simple_object_size)
         file_name_1 = object_key_from_file_path(file_path_1)
-        file_path_2 = generate_file()
+        file_path_2 = generate_file(simple_object_size)
         file_name_2 = object_key_from_file_path(file_path_2)
 
         with allure.step("Create two buckets with different bucket configuration"):
@@ -72,14 +62,26 @@ class TestS3GatePolicy(TestS3GateBase):
             assert bucket_loc_2 == "rep-3"
 
         with allure.step("Check object policy"):
-            cid_1 = search_container_by_name(self.wallet, bucket_1, shell=client_shell)
+            cid_1 = search_container_by_name(
+                self.wallet, bucket_1, shell=self.shell, endpoint=self.cluster.default_rpc_endpoint
+            )
             copies_1 = get_simple_object_copies(
-                wallet=self.wallet, cid=cid_1, oid=version_id_1, shell=client_shell
+                wallet=self.wallet,
+                cid=cid_1,
+                oid=version_id_1,
+                shell=self.shell,
+                nodes=self.cluster.storage_nodes,
             )
             assert copies_1 == 1
-            cid_2 = search_container_by_name(self.wallet, bucket_2, shell=client_shell)
+            cid_2 = search_container_by_name(
+                self.wallet, bucket_2, shell=self.shell, endpoint=self.cluster.default_rpc_endpoint
+            )
             copies_2 = get_simple_object_copies(
-                wallet=self.wallet, cid=cid_2, oid=version_id_2, shell=client_shell
+                wallet=self.wallet,
+                cid=cid_2,
+                oid=version_id_2,
+                shell=self.shell,
+                nodes=self.cluster.storage_nodes,
             )
             assert copies_2 == 3
 

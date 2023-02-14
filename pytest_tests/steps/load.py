@@ -1,11 +1,18 @@
 import concurrent.futures
+import re
 from dataclasses import asdict
 
 import allure
 from common import STORAGE_NODE_SERVICE_NAME_REGEX
 from k6 import K6, LoadParams, LoadResults
+from neofs_testlib.cli.neofs_authmate import NeofsAuthmate
+from neofs_testlib.cli.neogo import NeoGo
 from neofs_testlib.hosting import Hosting
-from neofs_testlib.shell import SSHShell
+from neofs_testlib.shell import CommandOptions, SSHShell
+from neofs_testlib.shell.interfaces import InteractiveInput
+
+NEOFS_AUTHMATE_PATH = "neofs-s3-authmate"
+STOPPED_HOSTS = []
 
 
 @allure.title("Get services endpoints")
@@ -14,6 +21,71 @@ def get_services_endpoints(
 ) -> list[str]:
     service_configs = hosting.find_service_configs(service_name_regex)
     return [service_config.attributes[endpoint_attribute] for service_config in service_configs]
+
+
+@allure.title("Stop nodes")
+def stop_unused_nodes(storage_nodes: list, used_nodes_count: int):
+    for node in storage_nodes[used_nodes_count:]:
+        host = node.host
+        STOPPED_HOSTS.append(host)
+        host.stop_host("hard")
+
+
+@allure.title("Start nodes")
+def start_stopped_nodes():
+    for host in STOPPED_HOSTS:
+        host.start_host()
+        STOPPED_HOSTS.remove(host)
+
+
+@allure.title("Init s3 client")
+def init_s3_client(
+    load_nodes: list, login: str, pkey: str, container_placement_policy: str, hosting: Hosting
+):
+    service_configs = hosting.find_service_configs(STORAGE_NODE_SERVICE_NAME_REGEX)
+    host = hosting.get_host_by_service(service_configs[0].name)
+    wallet_path = service_configs[0].attributes["wallet_path"]
+    neogo_cli_config = host.get_cli_config("neo-go")
+    neogo_wallet = NeoGo(shell=host.get_shell(), neo_go_exec_path=neogo_cli_config.exec_path).wallet
+    dump_keys_output = neogo_wallet.dump_keys(wallet=wallet_path, wallet_config=None).stdout
+    public_key = str(re.search(r":\n(?P<public_key>.*)", dump_keys_output).group("public_key"))
+    node_endpoint = service_configs[0].attributes["rpc_endpoint"]
+    # prompt_pattern doesn't work at the moment
+    for load_node in load_nodes:
+        ssh_client = SSHShell(host=load_node, login=login, private_key_path=pkey)
+        path = ssh_client.exec(r"sudo find . -name 'k6' -exec dirname {} \; -quit").stdout.strip(
+            "\n"
+        )
+        neofs_authmate_exec = NeofsAuthmate(ssh_client, NEOFS_AUTHMATE_PATH)
+        issue_secret_output = neofs_authmate_exec.secret.issue(
+            wallet=f"{path}/scenarios/files/wallet.json",
+            peer=node_endpoint,
+            bearer_rules=f"{path}/scenarios/files/rules.json",
+            gate_public_key=public_key,
+            container_placement_policy=container_placement_policy,
+            container_policy=f"{path}/scenarios/files/policy.json",
+            wallet_password="",
+        ).stdout
+        aws_access_key_id = str(
+            re.search(r"access_key_id.*:\s.(?P<aws_access_key_id>\w*)", issue_secret_output).group(
+                "aws_access_key_id"
+            )
+        )
+        aws_secret_access_key = str(
+            re.search(
+                r"secret_access_key.*:\s.(?P<aws_secret_access_key>\w*)", issue_secret_output
+            ).group("aws_secret_access_key")
+        )
+        # prompt_pattern doesn't work at the moment
+        configure_input = [
+            InteractiveInput(prompt_pattern=r"AWS Access Key ID.*", input=aws_access_key_id),
+            InteractiveInput(
+                prompt_pattern=r"AWS Secret Access Key.*", input=aws_secret_access_key
+            ),
+            InteractiveInput(prompt_pattern=r".*", input=""),
+            InteractiveInput(prompt_pattern=r".*", input=""),
+        ]
+        ssh_client.exec("aws configure", CommandOptions(interactive_inputs=configure_input))
 
 
 @allure.title("Clear cache and data from storage nodes")
@@ -32,15 +104,18 @@ def prepare_objects(k6_instance: K6):
 
 
 @allure.title("Prepare K6 instances and objects")
-def prepare_k6_instances(load_nodes: list, login: str, pkey: str, load_params: LoadParams) -> list:
+def prepare_k6_instances(
+    load_nodes: list, login: str, pkey: str, load_params: LoadParams, prepare: bool = True
+) -> list[K6]:
     k6_load_objects = []
     for load_node in load_nodes:
         ssh_client = SSHShell(host=load_node, login=login, private_key_path=pkey)
         k6_load_object = K6(load_params, ssh_client)
         k6_load_objects.append(k6_load_object)
     for k6_load_object in k6_load_objects:
-        with allure.step("Prepare objects"):
-            prepare_objects(k6_load_object)
+        if prepare:
+            with allure.step("Prepare objects"):
+                prepare_objects(k6_load_object)
     return k6_load_objects
 
 
